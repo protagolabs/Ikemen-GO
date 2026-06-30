@@ -84,6 +84,7 @@ func main() {
 
 	// Initialize game and create window
 	sys.luaLState = sys.init(tmp.GameWidth, tmp.GameHeight)
+	InitAiBridge() // AI Bridge: start Unix socket server
 	defer sys.shutdown()
 
 	// Begin processing game using its lua scripts

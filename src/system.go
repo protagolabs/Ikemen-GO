@@ -130,6 +130,7 @@ type System struct {
 	keyState                map[Key]bool
 	netInput                *NetInput
 	fileInput               *FileInput
+	bridgeInput             *BridgeInput
 	aiInput                 [MaxSimul*2 + MaxAttachedChar]AiInput
 	keyConfig               []KeyConfig
 	joystickConfig          []KeyConfig
@@ -1958,6 +1959,8 @@ func (s *System) fight() (reload bool) {
 	fin := false
 	for !s.endMatch {
 		s.step = false
+		s.ProcessBridgeCmd() // AI Bridge
+
 		for _, v := range s.shortcutScripts {
 			if v.Activate {
 				if err := s.luaLState.DoString(v.Script); err != nil {

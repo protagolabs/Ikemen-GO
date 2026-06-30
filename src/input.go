@@ -906,6 +906,22 @@ func (fi *FileInput) Update() bool {
 	return !sys.gameEnd
 }
 
+// BridgeInput feeds externally-supplied inputs (Arena FTG bridge) into the
+// command buffer for human-slot (controller>=0) players, exactly like replay
+// (FileInput) / netplay (NetInput) do. Because the slots are NOT AI-controlled
+// (run with -p.ai 0), the engine's built-in AI never acts: idle bits => the
+// fighter stands still, and only injected bits drive it. ib[] is written live
+// by the bridge's SET_INPUT command.
+type BridgeInput struct {
+	ib [MaxSimul*2 + MaxAttachedChar]InputBits
+}
+
+func (bi *BridgeInput) Input(cb *CommandBuffer, i int, facing int32) {
+	if i >= 0 && i < len(bi.ib) {
+		bi.ib[sys.inputRemap[i]].GetInput(cb, facing)
+	}
+}
+
 type AiInput struct {
 	dir, dirt, at, bt, ct, xt, yt, zt, st, dt, wt, mt int32
 }
@@ -1498,6 +1514,8 @@ func (cl *CommandList) Input(i int, facing int32, aiLevel float32, ib InputBits)
 	}
 	_else := i < 0
 	if _else {
+	} else if sys.bridgeInput != nil {
+		sys.bridgeInput.Input(cl.Buffer, i, facing)
 	} else if sys.fileInput != nil {
 		sys.fileInput.Input(cl.Buffer, i, facing)
 	} else if sys.netInput != nil {
