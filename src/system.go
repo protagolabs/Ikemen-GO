@@ -2124,8 +2124,12 @@ func (s *System) fight() (reload bool) {
 		if !s.frameSkip {
 			s.drawDebug()
 		}
-		// Break if finished
-		if fin && (!s.postMatchFlg || len(sys.commonLua) == 0) {
+		// Break if finished. In bridge-managed mode (arena AI bridge active)
+		// the engine must NOT self-exit on match over: the controller reads
+		// match_over/finish via GET_STATE, captures the end animation, then
+		// terminates the process itself. Keep the loop alive so the bridge
+		// keeps answering; non-bridged play behaves exactly as before.
+		if fin && (!s.postMatchFlg || (len(sys.commonLua) == 0 && !bridgeManaged)) {
 			break
 		}
 

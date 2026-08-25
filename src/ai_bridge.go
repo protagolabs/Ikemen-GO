@@ -20,9 +20,9 @@ import (
 
 // BridgeCmd：外部进程发来的指令
 type BridgeCmd struct {
-	Cmd    string `json:"cmd"`             // GET_STATE | SET_INPUT | STEP | PAUSE
-	Player int    `json:"player"`          // 0=P1, 1=P2（SET_INPUT 时使用）
-	Input  string `json:"input,omitempty"` // "forward+a" 等组合，见下方解析
+	Cmd    string `json:"cmd"`              // GET_STATE | SET_INPUT | STEP | PAUSE
+	Player int    `json:"player"`           // 0=P1, 1=P2（SET_INPUT 时使用）
+	Input  string `json:"input,omitempty"`  // "forward+a" 等组合，见下方解析
 	Frames int    `json:"frames,omitempty"` // STEP 推进的帧数，默认 30
 }
 
@@ -38,9 +38,15 @@ type GameState struct {
 	P2X     float32 `json:"p2_x"`
 	P2Y     float32 `json:"p2_y"`
 	P2State int32   `json:"p2_state"`
-	Frame   int32   `json:"frame"`   // 当前游戏帧
+	Frame   int32   `json:"frame"` // 当前游戏帧
 	Paused  bool    `json:"paused"`
 	Round   int     `json:"round"`
+	// Match-end fields. finish/win_team are authoritative only once match_over
+	// is true; before that finish is "not_yet" and win_team is -1.
+	Time      int32  `json:"time"`       // 剩余回合时间（round.time 的刻度）
+	Finish    string `json:"finish"`     // "not_yet"|"ko"|"dko"|"to"|"todraw"
+	WinTeam   int    `json:"win_team"`   // -1=平局, 0=P1胜, 1=P2胜
+	MatchOver bool   `json:"match_over"` // 整场比赛是否已分出胜负
 }
 
 // BridgeResp：返回给外部进程的响应
@@ -55,11 +61,16 @@ type BridgeResp struct {
 // -----------------------------------------------------------------------
 
 var (
-	bridgeCmdCh  = make(chan BridgeCmd)   // 外部指令 → 主循环
-	bridgeRespCh = make(chan BridgeResp)  // 主循环 → 外部响应
+	bridgeCmdCh  = make(chan BridgeCmd)  // 外部指令 → 主循环
+	bridgeRespCh = make(chan BridgeResp) // 主循环 → 外部响应
 
 	// stepRemain：剩余需要推进的帧数；原子操作，主循环每帧 -1
 	stepRemain int32
+
+	// bridgeManaged：bridge socket 成功监听后置 true。此时比赛结束不再由
+	// 引擎自行退出（system.go 的 fight 循环据此跳过 endMatch break），改由
+	// 外部 controller 读取 match_over/finish 后主动终止进程。
+	bridgeManaged bool
 )
 
 // -----------------------------------------------------------------------
@@ -80,6 +91,8 @@ func InitAiBridge() {
 		return
 	}
 
+	// bridge 托管生效：比赛结束由 controller 主动终止，引擎不再自退。
+	bridgeManaged = true
 	log.Printf("[ai_bridge] 监听 %s", sockPath)
 
 	go func() {
@@ -184,9 +197,13 @@ func (s *System) execBridgeCmd(cmd BridgeCmd) {
 
 func (s *System) buildGameState() GameState {
 	gs := GameState{
-		Frame:  int32(s.tickCount),
-		Paused: s.paused,
-		Round:  int(s.round),
+		Frame:     int32(s.tickCount),
+		Paused:    s.paused,
+		Round:     int(s.round),
+		Time:      s.time,
+		Finish:    finishToString(s.finish),
+		WinTeam:   s.winTeam,
+		MatchOver: s.matchOver(),
 	}
 
 	if len(s.chars) > 0 && len(s.chars[0]) > 0 {
@@ -208,6 +225,23 @@ func (s *System) buildGameState() GameState {
 	}
 
 	return gs
+}
+
+// finishToString maps the engine's FinishType to a stable wire string. The
+// controller consumes this to choose endReason ("ko"/"timeout") and winner.
+func finishToString(f FinishType) string {
+	switch f {
+	case FT_KO:
+		return "ko"
+	case FT_DKO:
+		return "dko"
+	case FT_TO:
+		return "to"
+	case FT_TODraw:
+		return "todraw"
+	default:
+		return "not_yet"
+	}
 }
 
 // moveToInputBits converts a bridge action string (engine tokens like
